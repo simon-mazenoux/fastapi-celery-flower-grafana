@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+
+
+  rabbitmq:
+    image: rabbitmq
+    container_name: rabbitmq
+    ports:
+      - 5672:5672
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=password
+
+  api:
+    build:
+      context: src/api
+    container_name: api
+    command: uvicorn main:app --proxy-headers --host 0.0.0.0 --port 8080
+    ports:
+      - 8080:8080
+    environment:
+      - CELERY_BROKER_URL=amqp://admin:password@rabbitmq:5672/
+      - CELERY_RESULT_BACKEND=rpc://admin:password@rabbitmq:5672/
+    depends_on:
+      - rabbitmq
+
+  worker:
+    build:
+      context: src/worker
+    container_name: worker1
+    command: celery --app main:celery worker -l info --concurrency=10
+    user: nobody
+    environment:
+      - CELERY_BROKER_URL=amqp://admin:password@rabbitmq:5672/
+      - CELERY_RESULT_BACKEND=rpc://admin:password@rabbitmq:5672/
+    depends_on:
+      - rabbitmq
+
+  flower:
+    image: mher/flower
+    container_name: flower
+    environment:
+      - CELERY_BROKER_URL=amqp://admin:password@rabbitmq:5672/
+      - FLOWER_PORT=5555
+    ports:
+      - 5555:5555
+    depends_on:
+      - worker
+      - rabbitmq
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - 9090:9090 
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - 3000:3000
+    depends_on:
+      - prometheus
